@@ -1,0 +1,10 @@
+streamlit
+google-generativeai
+pillow
+reportlab
+requests
+diffusers
+transformers
+accelerate
+safetensors
+torch
