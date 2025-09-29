@@ -13,10 +13,10 @@ from huggingface_hub import InferenceClient
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 # ------------------------------
-# 2. Hugging Face Setup (Image Generation)
+# 2. Hugging Face Setup (Image Generation with Stable Diffusion 2)
 # ------------------------------
 HF_TOKEN = st.secrets["HF_API_KEY"]
-image_client = InferenceClient("black-forest-labs/FLUX.1-Krea-dev", token=HF_TOKEN)
+image_client = InferenceClient("stabilityai/stable-diffusion-2", token=HF_TOKEN)
 
 # ------------------------------
 # 3. Streamlit UI
@@ -29,7 +29,7 @@ st.write("Generate a complete brand kit (logo, tagline, mission, and brand guide
 brand_name = st.text_input("Enter your Brand Name")
 industry = st.text_input("Enter your Industry")
 vibe = st.selectbox("Select your Brand Vibe", ["Luxury", "Fun", "Eco-Friendly", "Minimalist", "Techy"])
-theme_color = st.color_picker("Pick your brand's theme color", "#000000")
+brand_color = st.color_picker("Pick your Brand Color", "#000000")
 
 # ------------------------------
 # 4. Brand Kit Generation
@@ -57,16 +57,17 @@ if st.button("🚀 Generate Brand Kit"):
             st.subheader("📝 Brand Identity Text")
             st.write(brand_text)
 
-            # --- (B) Generate AI Logo with FLUX ---
+            # --- (B) Generate AI Logo with Stable Diffusion ---
             st.subheader("🎨 Generated Logo")
             logo_img = None
             logo_prompt = (
-                f"Minimal modern logo design for {brand_name}, {vibe} style, {industry} brand identity, "
-                f"vector graphic, clean lines, primary color {theme_color}"
+                f"Minimal modern flat vector logo design for {brand_name}, "
+                f"{vibe} style, {industry} brand identity, clean lines, "
+                f"color scheme: {brand_color}"
             )
             try:
                 logo_img = image_client.text_to_image(logo_prompt)
-                st.image(logo_img, caption=f"AI-Generated Logo ({theme_color})", use_container_width=True)
+                st.image(logo_img, caption=f"AI-Generated Logo ({brand_color})", use_container_width=True)
             except Exception as e:
                 st.error(f"Image generation failed: {e}")
 
@@ -79,21 +80,31 @@ if st.button("🚀 Generate Brand Kit"):
             c.setFont("Helvetica", 12)
             c.drawString(100, 720, f"Industry: {industry}")
             c.drawString(100, 700, f"Vibe: {vibe}")
-            c.drawString(100, 680, f"Theme Color: {theme_color}")
-            c.drawString(100, 660, "---------------------------------------")
+            c.drawString(100, 680, "---------------------------------------")
 
             # Add Logo to PDF
             if logo_img:
                 img_bytes = io.BytesIO()
                 logo_img.save(img_bytes, format="PNG")
                 img_bytes.seek(0)
-                c.drawImage(ImageReader(img_bytes), 100, 450, width=200, height=200)
+                c.drawImage(ImageReader(img_bytes), 100, 500, width=200, height=200)
 
             # Add Brand Text
-            text_obj = c.beginText(100, 420)
+            text_obj = c.beginText(100, 460)
             for line in brand_text.split("\n"):
                 text_obj.textLine(line)
             c.drawText(text_obj)
+
+            # Add Selected Color
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(100, 300, "Brand Color:")
+            r = int(brand_color[1:3], 16) / 255
+            g = int(brand_color[3:5], 16) / 255
+            b = int(brand_color[5:7], 16) / 255
+            c.setFillColorRGB(r, g, b)
+            c.rect(100, 270, 60, 20, fill=1, stroke=0)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawString(170, 275, brand_color)
 
             c.save()
 
