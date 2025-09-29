@@ -7,33 +7,28 @@ from reportlab.lib.utils import ImageReader
 from huggingface_hub import InferenceClient
 
 # ------------------------------
-# 1. Hugging Face Setup
+# Hugging Face Setup
 # ------------------------------
 HF_TOKEN = st.secrets["HF_API_KEY"]
 
-# Hugging Face models (free)
-IMAGE_MODEL = "stabilityai/stable-diffusion-2-1-base"
-TEXT_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
-
 # Clients
-image_client = InferenceClient(IMAGE_MODEL, token=HF_TOKEN)
-text_client = InferenceClient(TEXT_MODEL, token=HF_TOKEN)
+text_client = InferenceClient("mistralai/Mistral-7B-Instruct-v0.2", token=HF_TOKEN)
+image_client = InferenceClient("black-forest-labs/FLUX.1-Krea-dev", token=HF_TOKEN)
 
 # ------------------------------
-# 2. Streamlit UI
+# Streamlit UI
 # ------------------------------
 st.set_page_config(page_title="AI Brand Identity Creator", page_icon="🎨", layout="centered")
 st.title("🎨 AI Brand Identity Creator")
 st.write("Generate a complete brand kit (logo, tagline, mission, and brand guide) instantly with AI.")
 
-# User Inputs
 brand_name = st.text_input("Enter your Brand Name")
 industry = st.text_input("Enter your Industry")
 vibe = st.selectbox("Select your Brand Vibe", ["Luxury", "Fun", "Eco-Friendly", "Minimalist", "Techy"])
 theme_color = st.color_picker("Pick a theme color for your brand", "#FF5733")
 
 # ------------------------------
-# 3. Brand Kit Generation
+# Brand Kit Generation
 # ------------------------------
 if st.button("🚀 Generate Brand Kit"):
     if not brand_name or not industry:
@@ -41,7 +36,7 @@ if st.button("🚀 Generate Brand Kit"):
     else:
         with st.spinner("✨ Creating your brand kit... please wait"):
 
-            # --- (A) Generate Brand Text Assets ---
+            # --- (A) Text Generation ---
             copy_prompt = f"""
             You are a professional brand strategist. Create a branding kit for a {vibe} brand.
             Brand Name: {brand_name}
@@ -53,23 +48,22 @@ if st.button("🚀 Generate Brand Kit"):
             """
 
             try:
-                copy_response = text_client.text_generation(
+                response = text_client.text_generation(
                     prompt=copy_prompt,
-                    max_new_tokens=400,
+                    max_new_tokens=300,
                     temperature=0.7
                 )
-                brand_text = copy_response
+                brand_text = response
             except Exception as e:
                 st.error(f"Text generation failed: {e}")
-                brand_text = "Error: No branding text generated."
+                brand_text = "⚠️ Error: No branding text generated."
 
-            # Show text output
             st.subheader("📝 Brand Identity Text")
             st.write(brand_text)
 
-            # --- (B) Generate AI Logo ---
+            # --- (B) Logo Generation with FLUX ---
             st.subheader("🎨 Generated Logo")
-            logo_prompt = f"Minimal modern logo design for {brand_name}, {vibe} style, {industry} industry, theme color {theme_color}, flat vector, clean lines"
+            logo_prompt = f"Minimal clean logo design for {brand_name}, {vibe} style, {industry} industry, main color {theme_color}, vector style, flat modern icon"
 
             try:
                 image_bytes = image_client.text_to_image(prompt=logo_prompt)
@@ -89,16 +83,14 @@ if st.button("🚀 Generate Brand Kit"):
                     unsafe_allow_html=True
                 )
 
-            # --- (D) Create PDF Guide ---
+            # --- (D) Create PDF with Logo ---
             pdf_path = f"{brand_name}_brand_guide.pdf"
             c = canvas.Canvas(pdf_path, pagesize=letter)
             c.setFont("Helvetica-Bold", 18)
             c.drawString(100, 750, f"Brand Guide: {brand_name}")
 
-            # Insert logo in PDF if available
             if logo_img:
-                img_reader = ImageReader(logo_img)
-                c.drawImage(img_reader, 100, 600, width=120, height=120, mask='auto')
+                c.drawImage(ImageReader(logo_img), 100, 600, width=120, height=120, mask="auto")
 
             c.setFont("Helvetica", 12)
             c.drawString(100, 570, f"Industry: {industry}")
@@ -112,17 +104,14 @@ if st.button("🚀 Generate Brand Kit"):
             c.drawText(text_obj)
             c.save()
 
-            # --- (E) Package Everything ---
+            # --- (E) ZIP Package ---
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "a") as zip_file:
-                # Save branding text
                 zip_file.writestr("brand_text.txt", brand_text)
-                # Save logo
                 if logo_img:
                     img_bytes = io.BytesIO()
                     logo_img.save(img_bytes, format="PNG")
                     zip_file.writestr("logo.png", img_bytes.getvalue())
-                # Save PDF
                 zip_file.write(pdf_path, os.path.basename(pdf_path))
 
             st.success("✅ Brand Kit Generated!")
