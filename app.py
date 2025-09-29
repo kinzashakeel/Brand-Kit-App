@@ -45,7 +45,7 @@ if st.button("🚀 Generate Brand Kit"):
             - A 2–3 sentence mission statement
             - A short brand story (4–5 sentences)
             """
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             text_response = model.generate_content(text_prompt)
             brand_text = text_response.text
 
