@@ -1,20 +1,24 @@
 import streamlit as st
 import google.generativeai as genai
 from PIL import Image
-import requests, io, zipfile, os
+import io, zipfile, os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+from huggingface_hub import InferenceClient
 
 # ------------------------------
 # 1. Gemini Setup (Text Generation)
 # ------------------------------
-# You need to set your Gemini API key as a secret in Streamlit Cloud:
-# st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
+# ------------------------------
+# 2. Hugging Face Setup (Image Generation)
+# ------------------------------
+HF_TOKEN = st.secrets["HF_API_KEY"]
+image_client = InferenceClient("black-forest-labs/FLUX.1-Krea-dev", token=HF_TOKEN)
 
 # ------------------------------
-# 2. Streamlit UI
+# 3. Streamlit UI
 # ------------------------------
 st.set_page_config(page_title="AI Brand Identity Creator", page_icon="🎨", layout="centered")
 st.title("🎨 AI Brand Identity Creator")
@@ -25,9 +29,8 @@ brand_name = st.text_input("Enter your Brand Name")
 industry = st.text_input("Enter your Industry")
 vibe = st.selectbox("Select your Brand Vibe", ["Luxury", "Fun", "Eco-Friendly", "Minimalist", "Techy"])
 
-
 # ------------------------------
-# 3. Brand Kit Generation
+# 4. Brand Kit Generation
 # ------------------------------
 if st.button("🚀 Generate Brand Kit"):
     if not brand_name or not industry:
@@ -53,31 +56,26 @@ if st.button("🚀 Generate Brand Kit"):
             st.subheader("📝 Brand Identity Text")
             st.write(brand_text)
 
-
-            # --- (B) Generate AI Logo (Stable Diffusion from Hugging Face API) ---
+            # --- (B) Generate AI Logo with FLUX.1-Krea-dev ---
             st.subheader("🎨 Generated Logo")
             logo_prompt = f"Minimal modern logo design for {brand_name}, {vibe} style, {industry} brand identity, vector graphic, clean lines"
             
-            # Hugging Face Inference API endpoint (Stable Diffusion)
-            HF_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2"
-            headers = {"Authorization": f"Bearer {st.secrets['HF_API_KEY']}"}
-            
-            def query(payload):
-                response = requests.post(HF_API_URL, headers=headers, json=payload)
-                return response.content
-            
-            image_bytes = query({"inputs": logo_prompt})
-            logo_img = Image.open(io.BytesIO(image_bytes))
-            st.image(logo_img, caption="AI-Generated Logo", use_container_width=True)
-
+            try:
+                logo_img = image_client.text_to_image(logo_prompt)
+                st.image(logo_img, caption="AI-Generated Logo", use_container_width=True)
+            except Exception as e:
+                st.error(f"Image generation failed: {e}")
+                logo_img = None
 
             # --- (C) Generate a Color Palette (Simple Example) ---
             st.subheader("🎨 Suggested Color Palette")
             colors = ["#FF5733", "#33C1FF", "#75FF33", "#FFC733", "#9D33FF"]  # placeholder colors
             cols = st.columns(len(colors))
             for idx, col in enumerate(cols):
-                col.markdown(f"<div style='background-color:{colors[idx]}; width:80px; height:40px; border-radius:5px'></div>", unsafe_allow_html=True)
-
+                col.markdown(
+                    f"<div style='background-color:{colors[idx]}; width:80px; height:40px; border-radius:5px'></div>",
+                    unsafe_allow_html=True
+                )
 
             # --- (D) Create a PDF Brand Guide ---
             pdf_path = f"{brand_name}_brand_guide.pdf"
@@ -96,20 +94,22 @@ if st.button("🚀 Generate Brand Kit"):
             c.drawText(text_obj)
             c.save()
 
-
             # --- (E) Package Everything into a ZIP File ---
             zip_buffer = io.BytesIO()
             with zipfile.ZipFile(zip_buffer, "a") as zip_file:
                 # Save brand text
                 zip_file.writestr("brand_text.txt", brand_text)
-                # Save logo image
-                img_bytes = io.BytesIO()
-                logo_img.save(img_bytes, format="PNG")
-                zip_file.writestr("logo.png", img_bytes.getvalue())
+                # Save logo image if available
+                if logo_img:
+                    img_bytes = io.BytesIO()
+                    logo_img.save(img_bytes, format="PNG")
+                    zip_file.writestr("logo.png", img_bytes.getvalue())
                 # Save PDF guide
                 zip_file.write(pdf_path, os.path.basename(pdf_path))
 
             st.success("✅ Brand Kit Generated!")
-            st.download_button("📥 Download Brand Kit (ZIP)", 
-                               zip_buffer.getvalue(), 
-                               file_name=f"{brand_name}_kit.zip")
+            st.download_button(
+                "📥 Download Brand Kit (ZIP)", 
+                zip_buffer.getvalue(), 
+                file_name=f"{brand_name}_kit.zip"
+            )
