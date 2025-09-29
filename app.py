@@ -4,6 +4,7 @@ from PIL import Image
 import io, zipfile, os
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
 from huggingface_hub import InferenceClient
 
 # ------------------------------
@@ -58,46 +59,61 @@ if st.button("🚀 Generate Brand Kit"):
             # --- (B) Ask Gemini for Color Palette ---
             color_prompt = f"Suggest 5 hex color codes for a {vibe} {industry} brand called {brand_name}."
             color_response = model.generate_content(color_prompt)
-            color_suggestions = color_response.text.strip().split()
+            color_suggestions = [c.strip() for c in color_response.text.strip().split() if c.startswith("#")][:5]
 
-            st.subheader("🎨 Suggested Color Palette")
-            cols = st.columns(len(color_suggestions))
-            for idx, col in enumerate(cols):
-                col.markdown(
-                    f"<div style='background-color:{color_suggestions[idx]}; "
-                    f"width:80px; height:40px; border-radius:5px'></div>",
-                    unsafe_allow_html=True
-                )
+            st.subheader("🎨 Suggested Color Palettes")
+            selected_color = st.radio("Pick your main brand color:", color_suggestions)
 
-            # --- (C) Generate AI Logo with FLUX, using colors ---
+            # --- (C) Generate AI Logo with FLUX, using selected color ---
             st.subheader("🎨 Generated Logo")
-            logo_prompt = (
-                f"Minimal modern logo design for {brand_name}, {vibe} style, {industry} brand identity, "
-                f"vector graphic, clean lines, color scheme: {', '.join(color_suggestions)}"
-            )
+            logo_img = None
+            if selected_color:
+                logo_prompt = (
+                    f"Minimal modern logo design for {brand_name}, {vibe} style, {industry} brand identity, "
+                    f"vector graphic, clean lines, color scheme: {selected_color}"
+                )
+                try:
+                    logo_img = image_client.text_to_image(logo_prompt)
+                    st.image(logo_img, caption=f"AI-Generated Logo ({selected_color})", use_container_width=True)
+                except Exception as e:
+                    st.error(f"Image generation failed: {e}")
 
-            try:
-                logo_img = image_client.text_to_image(logo_prompt)
-                st.image(logo_img, caption="AI-Generated Logo", use_container_width=True)
-            except Exception as e:
-                st.error(f"Image generation failed: {e}")
-                logo_img = None
-
-            # --- (D) Create a PDF Brand Guide ---
+            # --- (D) Create a PDF Brand Guide with logo + swatches ---
             pdf_path = f"{brand_name}_brand_guide.pdf"
             c = canvas.Canvas(pdf_path, pagesize=letter)
             c.setFont("Helvetica-Bold", 18)
             c.drawString(100, 750, f"Brand Guide: {brand_name}")
+
             c.setFont("Helvetica", 12)
             c.drawString(100, 720, f"Industry: {industry}")
             c.drawString(100, 700, f"Vibe: {vibe}")
-            c.drawString(100, 680, f"Color Palette: {', '.join(color_suggestions)}")
-            c.drawString(100, 660, "---------------------------------------")
+            c.drawString(100, 680, "---------------------------------------")
 
-            text_obj = c.beginText(100, 640)
+            # Add Logo to PDF
+            if logo_img:
+                img_bytes = io.BytesIO()
+                logo_img.save(img_bytes, format="PNG")
+                img_bytes.seek(0)
+                c.drawImage(ImageReader(img_bytes), 100, 500, width=200, height=200)
+
+            # Add Brand Text
+            text_obj = c.beginText(100, 460)
             for line in brand_text.split("\n"):
                 text_obj.textLine(line)
             c.drawText(text_obj)
+
+            # Add Color Swatches
+            y = 300
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(100, y, "Brand Colors:")
+            y -= 20
+            for col in color_suggestions:
+                c.setFillColorRGB(int(col[1:3], 16)/255, int(col[3:5], 16)/255, int(col[5:7], 16)/255)
+                c.rect(100, y, 60, 20, fill=1, stroke=0)
+                c.setFillColorRGB(0, 0, 0)
+                c.drawString(170, y+5, col)
+                y -= 30
+
             c.save()
 
             # --- (E) Package Everything into a ZIP File ---
