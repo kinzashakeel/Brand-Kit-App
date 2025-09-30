@@ -1,62 +1,118 @@
 import streamlit as st
 import google.generativeai as genai
-from diffusers import StableDiffusionPipeline
-import torch
-import os
+from PIL import Image
+import io, zipfile, os
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from huggingface_hub import InferenceClient
 
-# ---------------------------
-# Configure Gemini API
-# ---------------------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # set your key in terminal or .env
-genai.configure(api_key=GEMINI_API_KEY)
+# ------------------------------
+# 1. Gemini Setup (Text Generation)
+# ------------------------------
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# ---------------------------
-# Load Stable Diffusion (Light Image Model)
-# ---------------------------
-@st.cache_resource
-def load_image_model():
-    model_id = "runwayml/stable-diffusion-v1-5"  # lightweight logo gen
-    pipe = StableDiffusionPipeline.from_pretrained(
-        model_id, torch_dtype=torch.float16
-    )
-    pipe = pipe.to("cuda" if torch.cuda.is_available() else "cpu")
-    return pipe
+# ------------------------------
+# 2. Hugging Face Setup (Image Generation)
+# ------------------------------
+HF_TOKEN = st.secrets["HF_API_KEY"]
+image_client = InferenceClient("black-forest-labs/FLUX.1-Krea-dev", token=HF_TOKEN)
 
-# ---------------------------
-# App UI
-# ---------------------------
-st.set_page_config(page_title="AI Business Idea Generator", layout="wide")
-st.title("🚀 AI Startup Idea Builder")
+# ------------------------------
+# 3. Streamlit UI
+# ------------------------------
+st.set_page_config(page_title="AI Brand Identity Creator", page_icon="🎨", layout="centered")
+st.title("🎨 AI Brand Identity Creator")
+st.write("Generate a complete brand kit (logo, tagline, mission, and brand guide) instantly with AI.")
 
-# Sidebar input
-with st.sidebar:
-    st.header("⚙️ Customize Your Idea")
-    niche = st.text_input("Business Niche", "food delivery")
-    target = st.text_input("Target Audience", "college students")
-    tone = st.selectbox("Tone", ["Professional", "Friendly", "Funny"])
-    color_theme = st.color_picker("Pick a theme color", "#FF5733")
-    generate_btn = st.button("✨ Generate Startup Idea")
+# User Inputs
+brand_name = st.text_input("Enter your Brand Name")
+industry = st.text_input("Enter your Industry")
+vibe = st.selectbox("Select your Brand Vibe", ["Luxury", "Fun", "Eco-Friendly", "Minimalist", "Techy"])
 
-# ---------------------------
-# Main Logic
-# ---------------------------
-if generate_btn:
-    # ---- Gemini Text Generation ----
-    st.subheader("💡 Business Idea")
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    text_prompt = (
-        f"Generate a {tone.lower()} startup idea in the niche of {niche}, "
-        f"targeted at {target}. Provide:\n"
-        f"- A creative business name\n"
-        f"- A catchy one-liner\n"
-        f"- A short pitch (3-4 sentences)\n"
-    )
+# ------------------------------
+# 4. Brand Kit Generation
+# ------------------------------
+if st.button("🚀 Generate Brand Kit"):
+    if not brand_name or not industry:
+        st.warning("⚠️ Please enter brand name and industry before generating.")
+    else:
+        with st.spinner("✨ Creating your brand kit... please wait"):
 
-    response = model.generate_content(text_prompt)
-    st.write(response.text)
+            # --- (A) Generate Brand Text Assets with Gemini ---
+            text_prompt = f"""
+            You are a brand strategist. Create a branding kit for a {vibe} brand.
+            Brand Name: {brand_name}
+            Industry: {industry}
+            Provide:
+            - A catchy tagline
+            - A 2–3 sentence mission statement
+            - A short brand story (4–5 sentences)
+            """
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            text_response = model.generate_content(text_prompt)
+            brand_text = text_response.text
 
-    # ---- Logo Generation ----
-    st.subheader("🎨 AI Logo")
-    img_pipe = load_image_model()
-    image = img_pipe(f"Minimal startup logo for {niche}, theme color {color_theme}").images[0]
-    st.image(image, caption="Generated Logo", use_column_width=True)
+            st.subheader("📝 Brand Identity Text")
+            st.write(brand_text)
+
+            # --- (B) Ask Gemini for Color Palette ---
+            color_prompt = f"Suggest 5 hex color codes for a {vibe} {industry} brand called {brand_name}."
+            color_response = model.generate_content(color_prompt)
+            color_suggestions = color_response.text.strip().split()
+
+            st.subheader("🎨 Suggested Color Palette")
+            cols = st.columns(len(color_suggestions))
+            for idx, col in enumerate(cols):
+                col.markdown(
+                    f"<div style='background-color:{color_suggestions[idx]}; "
+                    f"width:80px; height:40px; border-radius:5px'></div>",
+                    unsafe_allow_html=True
+                )
+
+            # --- (C) Generate AI Logo with FLUX, using colors ---
+            st.subheader("🎨 Generated Logo")
+            logo_prompt = (
+                f"Minimal modern logo design for {brand_name}, {vibe} style, {industry} brand identity, "
+                f"vector graphic, clean lines, color scheme: {', '.join(color_suggestions)}"
+            )
+
+            try:
+                logo_img = image_client.text_to_image(logo_prompt)
+                st.image(logo_img, caption="AI-Generated Logo", use_container_width=True)
+            except Exception as e:
+                st.error(f"Image generation failed: {e}")
+                logo_img = None
+
+            # --- (D) Create a PDF Brand Guide ---
+            pdf_path = f"{brand_name}_brand_guide.pdf"
+            c = canvas.Canvas(pdf_path, pagesize=letter)
+            c.setFont("Helvetica-Bold", 18)
+            c.drawString(100, 750, f"Brand Guide: {brand_name}")
+            c.setFont("Helvetica", 12)
+            c.drawString(100, 720, f"Industry: {industry}")
+            c.drawString(100, 700, f"Vibe: {vibe}")
+            c.drawString(100, 680, f"Color Palette: {', '.join(color_suggestions)}")
+            c.drawString(100, 660, "---------------------------------------")
+
+            text_obj = c.beginText(100, 640)
+            for line in brand_text.split("\n"):
+                text_obj.textLine(line)
+            c.drawText(text_obj)
+            c.save()
+
+            # --- (E) Package Everything into a ZIP File ---
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "a") as zip_file:
+                zip_file.writestr("brand_text.txt", brand_text)
+                if logo_img:
+                    img_bytes = io.BytesIO()
+                    logo_img.save(img_bytes, format="PNG")
+                    zip_file.writestr("logo.png", img_bytes.getvalue())
+                zip_file.write(pdf_path, os.path.basename(pdf_path))
+
+            st.success("✅ Brand Kit Generated!")
+            st.download_button(
+                "📥 Download Brand Kit (ZIP)",
+                zip_buffer.getvalue(),
+                file_name=f"{brand_name}_kit.zip"
+            )
